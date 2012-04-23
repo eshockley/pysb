@@ -266,7 +266,7 @@ def getsobolarr(sobolarr, params, omag=1, useparams=None, usemag=None):
     # map a set of sobol pseudo-random numbers to a range for parameter evaluation
     # sobol: sobol number array of the appropriate length
     # params: array of parameters
-    # omag: order of magnitude over which params should be sampled
+    # omag: order of magnitude over which params should be sampled. this is effectively 3 orders of magnitude when omag=1
     #
 
     sobprmarr = numpy.zeros_like(sobolarr)
@@ -283,21 +283,10 @@ def getsobolarr(sobolarr, params, omag=1, useparams=None, usemag=None):
             ub[i] = params[i] * pow(10, omag)
             lb[i] = params[i] / pow(10, omag)
     
-    # sobprmarr = (sobolarr*(ub-lb)) + lb #map the [0..1] sobol array to the values for integration
-    #
     # see  for more info http://en.wikipedia.org/wiki/Exponential_family
-    if len(sobprmarr.shape) == 1:
-        sobprmarr = lb*(ub/lb)**sobolarr # map the [0..1] sobol array to values sampled over their omags
-    elif len(sobprmarr.shape) == 2:
-        for i in range(sobprmarr.shape[0]):
-            sobprmarr[i] = lb*(ub/lb)**sobolarr[i]
-    else:
-        print "array shape not allowed... "
-        
+    sobprmarr = lb*(ub/lb)**sobolarr # map the [0..1] sobol array to values sampled over their omags
 
     # sobprmarr is the N x len(params) array for sobol analysis
-    # lb is the lower bound of params
-    # ub is the upper bound of params
     return sobprmarr
 
 
@@ -416,10 +405,10 @@ def getvarsens(yA, yB, yC):
 
     # first get f_0^2, it only depends on yA. Notice this is an array of size n_observables
     f02 = yA.mean(axis=0)
-    f02 *= f02
+    f02 = numpy.multiply(f02, f02)
 
     # now get the denominator term for yA
-    yAd = yA * yA
+    yAd = numpy.multiply(yA, yA)
     yAd = yAd.mean(axis=0)
 
     #allocate the S_i and ST_i arrays
@@ -429,7 +418,7 @@ def getvarsens(yA, yB, yC):
     
     for i in range(nparms):
         Sens[i] = ((yA * yC[i]).mean(axis=0) - f02)/(yAd - f02)
-        SensT[i] = ((yB * yC[i]).mean(axis=0) - f02)/(yAd - f02)
+        SensT[i] = 1.0 - ((yB * yC[i]).mean(axis=0) - f02)/(yAd - f02)
 
     return Sens, SensT
         
