@@ -1,0 +1,4 @@
+g++ -c -g sobol_prb.cpp 
+g++ sobol_prb.o sobol.o 
+./a.out 
+
