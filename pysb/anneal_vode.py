@@ -6,6 +6,9 @@ import csv
 import scipy.interpolate
 from pysb.integrate import odesolve
 
+def annealrun():
+    pass
+
 def compare_data(xparray, simarray, axispairlist, vardata=False):
     """
     Compares two arrays of different size and returns the mean square
@@ -229,8 +232,10 @@ def annealfxn(zoparams, time, model, xpdata, xspairlist, lb, ub, tn = [], scalet
 
         # assign paramarr values to model.parameters this assumes that
         # assume the zoparams list order corresponds to the model.parameters list order
+        for i,j in enumerate(model.parameters):
+            j.value = paramarr[i]
         
-        
+        #update reltol/abstol here?
         outlist = odesolve(model, time)
 
         # normalized data needs a bit more tweaking before objfxn calculation
