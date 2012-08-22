@@ -5,11 +5,17 @@ import ctypes
 import csv
 import scipy.interpolate
 from pysb.integrate import odesolve
+import pysb.anneal
 
-def annealrun():
+def annealrun(model, time, xpdata, xplist):
+    # get the initial condition indexes, set them to not vary
+    # everything else should be 3 omag
+    # get the lb, ub, initarr
+    # run anneal.anneal
+    
     pass
 
-def compare_data(xparray, simarray, axispairlist, vardata=False):
+def compare_data(xparray, simarray, xspairlist, vardata=False):
     """
     Compares two arrays of different size and returns the mean square
     difference between them with an objective function:
@@ -108,7 +114,7 @@ def logparambounds(model, omag=1, useparams=[], usemag=None, initparams=[], init
     DOCUMENTATION HERE
     """
     params = []
-    for i in model.params:
+    for i in model.parameters:
         params.append(i.value)
     params= numpy.asarray(params)
 
@@ -125,7 +131,8 @@ def logparambounds(model, omag=1, useparams=[], usemag=None, initparams=[], init
         else:
             ub[i] = params[i] * pow(10, omag)
             lb[i] = params[i] / pow(10, omag)
-    return lb, ub
+    initarr = numpy.zeros_like(params) + 0.5 # init array
+    return lb, ub, initarr
 
 def linparambounds(model, fact=.25, useparams=[], usefact=None):
     """
@@ -222,7 +229,6 @@ def annealfxn(zoparams, time, model, xpdata, xspairlist, lb, ub, tn = [], scalet
     vardata: variance data available. default "false"
     fileobj: file object to write data output. default "None"
     """
-
     # convert of linear values from [0,1) to desired sampling distrib
     paramarr = mapprms(zoparams, lb, ub, scaletype="log")
 
@@ -236,16 +242,19 @@ def annealfxn(zoparams, time, model, xpdata, xspairlist, lb, ub, tn = [], scalet
             j.value = paramarr[i]
         
         #update reltol/abstol here?
-        outlist = odesolve(model, time)
+        t = numpy.linspace(0,time,1000)
+        y = odesolve(model, t)
+        #pull out the observables
+        outlist = numpy.vstack((t, [y[j.name] for j in model.observables]))
 
         # normalized data needs a bit more tweaking before objfxn calculation
         if norm is True:
             print "Normalizing data"
-            datamax = numpy.max(outlist[0], axis = 1)
-            datamin = numpy.min(outlist[0], axis = 1)
-            outlistnorm = ((outlist[0].T - datamin)/(datamax-datamin)).T
+            datamax = numpy.max(outlist, axis = 1)
+            datamin = numpy.min(outlist, axis = 1)
+            outlistnorm = ((outlist.T - datamin)/(datamax-datamin)).T
             # xpdata[0] should be time, get from original array
-            outlistnorm[0] = outlist[0][0].copy()
+            outlistnorm[0] = outlist[0].copy()
             # xpdata here should be normalized
             objout = compare_data(xpdata, outlistnorm, xspairlist, vardata)
             if tn:
@@ -253,9 +262,9 @@ def annealfxn(zoparams, time, model, xpdata, xspairlist, lb, ub, tn = [], scalet
                 objout += tn 
             print "NORM objout TOT:", objout
         else:
-            objout = compare_data(xpdata, outlist[0], xspairlist, vardata)
+            objout = compare_data(xpdata, outlist, xspairlist, vardata)
             if tn:
-                tn = tenninetycomp(outlist[0], tn)
+                tn = tenninetycomp(outlist, tn)
                 objout += tn 
             print "objout TOT:", objout
     else:
