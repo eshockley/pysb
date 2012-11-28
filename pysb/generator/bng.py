@@ -119,10 +119,10 @@ class BngGenerator(object):
 
 
 def format_monomer_site(monomer, site):
-    ret = site
+    ret = '' #site
     if monomer.site_states.has_key(site):
         for state in monomer.site_states[site]:
-            ret += '~' + state
+            ret += state
     return ret
 
 def format_reactionpattern(rp, for_observable=False):
