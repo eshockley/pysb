@@ -747,40 +747,7 @@ class Parameter(Component):
 
 class Compartment(Component):
 
-<<<<<<< HEAD
-    """
-    Model component representing a bounded reaction volume.
-
-    Parameters
-    ----------
-    parent : Compartment, optional
-        Compartment which contains this one. If not specified, this will be the
-        outermost compartment and its parent will be set to None.
-    dimension : integer, optional
-        The number of spatial dimensions in the compartment, either 2 (i.e. a
-        membrane) or 3 (a volume).
-    size : Parameter, optional
-        A parameter object whose value defines the volume or area of the
-        compartment. If not specified, the size will be fixed at 1.0.
-
-    Attributes
-    ----------
-    Identical to Parameters (see above).
-
-    Notes
-    -----
-    The compartments of a model must form a tree via their `parent` attributes
-    with a three-dimensional (volume) compartment at the root. A volume
-    compartment may have any number of two-dimensional (membrane) compartments
-    as its children, but never another volume compartment. A membrane
-    compartment may have a single volume compartment as its child, but nothing
-    else.
-
-    Examples
-    --------
-    Compartment('cytosol', dimension=3, size=cyto_vol, parent=ec_membrane)
-=======
-    def __init__(self, name, parent=None, dimension=3, size=None, _export=True, geometry=None):
+    def __init__(self, name, parent=None, dimension=3, size=None, _export=True, geometry=None, action=None):
         """
         Requires name, accepts optional parent, dimension and size. name is a
         string. parent should be the parent compartment, except for the root
@@ -803,10 +770,12 @@ class Compartment(Component):
         #FIXME: check for only ONE "None" parent? i.e. only one compartment can have a parent None?
         if size is not None and not isinstance(size, Parameter):
             raise Exception("size must be a parameter (or omitted)")
-        self.parent = parent
+
+        self.parent    = parent
         self.dimension = dimension
-        self.size = size
-        self.geometry = geometry
+        self.size      = size
+        self.geometry  = geometry
+        self.action    = action
         
         if(geometry != None):
             self.dimension = geometry.shape.dimension
@@ -820,7 +789,6 @@ class Compartment(Component):
     def __repr__(self):
         return  '%s(name=%s, parent=%s, dimension=%s, size=%s)' % \
             (self.__class__.__name__, repr(self.name), repr(self.parent), repr(self.dimension), repr(self.size))
-
 
 
 class Rule(Component):
@@ -859,7 +827,7 @@ class Rule(Component):
 
     def __init__(self, name, rule_expression, rate_forward, rate_reverse=None,
                  delete_molecules=False, move_connected=False,
-                 _export=True):
+                 _export=True, compartment=None):
         Component.__init__(self, name, _export)
         if not isinstance(rule_expression, RuleExpression):
             raise Exception("rule_expression is not a RuleExpression object")
@@ -875,6 +843,7 @@ class Rule(Component):
         self.rate_reverse = rate_reverse
         self.delete_molecules = delete_molecules
         self.move_connected = move_connected
+        self.compartment = compartment
         # TODO: ensure all numbered sites are referenced exactly twice within each of reactants and products
 
     def is_synth(self):
