@@ -747,23 +747,45 @@ class Parameter(Component):
 
 class Compartment(Component):
 
-    def __init__(self, name, parent=None, dimension=3, size=None, _export=True, geometry=None, action=None):
-        """
-        Requires name, accepts optional parent, dimension and size. name is a
-        string. parent should be the parent compartment, except for the root
-        compartment which should omit the parent argument. dimension may be 2
-        (for membranes) or 3 (for volumes). size is a parameter which defines
-        the compartment volume (the appropriate units will depend on the units
-        of the reaction rate constants).
+    """
 
-        Examples:
-        Compartment('cytosol', dimension=3, size=cyto_vol, parent=ec_membrane)
-        """
->>>>>>> Almost generating specs for SmolDyn.
+    Parameters
+    ----------
+    parent : Compartment, optional
+        Compartment which contains this one. If not specified, this will be the
+        outermost compartment and its parent will be set to None.
+    dimension : integer, optional
+        The number of spatial dimensions in the compartment, either 2 (i.e. a
+        membrane) or 3 (a volume).
+    size : Parameter, optional
+        A parameter object whose value defines the volume or area of the
+        compartment. If not specified, the size will be fixed at 1.0.
+    geometry : Parameter, optional
+        A geometrical specification of a compartment, currently used by SmolDyn,
+        but specification is generic.
+    action : Parameter, optional
+        Additional parameters for compartment required for some modeling frameworks (e.g. SmolDyn)
+
+    Attributes
+    ----------
+    Identical to Parameters (see above).
+
+    Notes
+    -----
+    The compartments of a model must form a tree via their `parent` attributes
+    with a three-dimensional (volume) compartment at the root. A volume
+    compartment may have any number of two-dimensional (membrane) compartments
+    as its children, but never another volume compartment. A membrane
+    compartment may have a single volume compartment as its child, but nothing
+    else.
+
+    Examples
+    --------
+    Compartment('cytosol', dimension=3, size=cyto_vol, parent=ec_membrane)
 
     """
 
-    def __init__(self, name, parent=None, dimension=3, size=None, _export=True):
+    def __init__(self, name, parent=None, dimension=3, size=None, _export=True, geometry=None, action=None):
         Component.__init__(self, name, _export)
         if parent != None and isinstance(parent, Compartment) == False:
             raise Exception("parent must be a predefined Compartment or None")
