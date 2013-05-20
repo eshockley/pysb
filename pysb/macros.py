@@ -46,7 +46,7 @@ __all__ = ['equilibrate',
            'catalyze', 'catalyze_state',
            'catalyze_one_step', 'catalyze_one_step_reversible',
            'synthesize', 'degrade', 'synthesize_degrade_table',
-           'assemble_pore_sequential', 'pore_transport', 'pore_bind']
+           'assemble_pore_sequential', 'pore_transport', 'pore_bind', 'assemble_chain_sequential_base']
 
 # Internal helper functions
 # =========================
@@ -1575,6 +1575,195 @@ def assemble_chain_sequential(subunit, site1, site2, max_size, ktable):
         chain_next = chain_species(subunit, site1, site2, size)
         name_func = functools.partial(chain_rule_name, size=size)
         components |= _macro_rule('assemble_chain_sequential',
+                                  s + chain_prev <> chain_next,
+                                  klist, ['kf', 'kr'],
+                                  name_func=name_func)
+
+    return components
+
+# Chain assembly
+# =============
+
+def chain_species_base(base, basesite, subunit, site1, site2, size, comp=1):
+    """
+    Return a MonomerPattern representing a chained species, chained to a base complex.
+
+    Parameters
+    ----------
+    base : Monomer or MonomerPattern
+        The base complex to which the growing chain will be attached.
+    basesite : string
+        Name of the site on complex where first subunit binds.
+    subunit : Monomer or MonomerPattern
+        The subunit of which the chain is composed.
+    site1, site2 : string
+        The names of the sites where one copy of `subunit` binds to the next.
+    size : integer
+        The number of subunits in the chain.
+    comp : optional; a ComplexPattern to which the base molecule is attached.
+
+    Returns
+    -------
+    A ComplexPattern corresponding to the chain.
+
+    Notes
+    -----
+    Similar to pore_species, but never closes the chain.
+
+    Examples
+    --------
+    Get the ComplexPattern object representing a chain of size 4 bound to a base, which is itself bound to a complex:
+
+        Model()
+        Monomer('Base', ['b1', 'b2'])
+        Monomer('Unit', ['p1', 'p2'])
+        Monomer('Complex1', ['s1'])
+        Monomer('Complex2', ['s1', 's2'])
+        chain_tetramer = chain_species_base(Base(b1=1, b2=ANY), 'b1', Unit, 'p1', 'p2', 4, Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY))
+
+    Execution::
+
+        >>> Model() # doctest:+ELLIPSIS
+        <Model '<interactive>' (monomers: 0, rules: 0, parameters: 0, compartments: 0) at ...>
+        >>> Monomer('Unit', ['p1', 'p2'])
+        Monomer('Unit', ['p1', 'p2'])
+        >>> Monomer('Base', ['b1', 'b2'])
+        Monomer('Base', ['b1', 'b2'])
+        >>> Monomer('Complex1', ['s1'])
+        Monomer('Complex1', ['s1'])
+        >>> Monomer('Complex2', ['s1', 's2'])
+        Monomer('Complex2', ['s1', s2'])
+        >>> chain_species_base(Base(b2=ANY), 'b1', Unit, 'p1', 'p2', 4, Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY))
+        MatchOnce(Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY) % Base(b1=1, b2=ANY) % Unit(p1=1, p2=2) % Unit(p1=2, p2=3) % Unit(p1=3, p2=4) % Unit(p1=4, p2=None))
+
+    """
+    _verify_sites(base, basesite)
+    _verify_sites(subunit, site1, site2)
+    if size <= 0:
+        raise ValueError("size must be an integer greater than 0")
+    if comp == 1:
+        compbase = base({basesite: 1})
+    else:
+        compbase = comp % base({basesite: 1})
+    if size == 1:
+        chainlink = compbase % subunit({site1: 1, site2: None})
+    elif size == 2:
+        chainlink = compbase % subunit({site1: 1, site2: 2}) % \
+            subunit({site1: 2, site2: None})
+    else:
+      # build up a ComplexPattern, starting with a single subunit
+        chainbase = compbase
+        chainlink = chainbase % subunit({site1: 1, site2: 2})
+        for i in range(2, size):
+            chainlink %= subunit({site1: i, site2: i+1})
+        chainlink %= subunit({site1: size, site2: None})
+        chainlink.match_once = True  
+    
+    return chainlink
+
+def assemble_chain_sequential_base(base, basesite, subunit, site1, site2, max_size, ktable, comp=1):
+    """
+    Generate rules to assemble a homomeric chain sequentially onto a base complex (only the subunit creates repeating chain, not the base).
+
+    The chain species are created by sequential addition of `subunit` monomers.
+    The chain structure is defined by the `pore_species_base` macro.
+
+    Parameters
+    ----------
+    base : Monomer or MonomerPattern
+        The base complex to which the chain is attached.
+    basesite : string
+        The name of the site on the complex to which chain attaches.
+    subunit : Monomer or MonomerPattern
+        The subunit of which the chain is composed.
+    site1, site2 : string
+        The names of the sites where one copy of `subunit` binds to the next; the first will also be the site where the first subunit binds the base.
+    max_size : integer
+        The maximum number of subunits in the chain.
+    ktable : list of lists of Parameters or numbers
+        Table of forward and reverse rate constants for the assembly steps. The
+        outer list must be of length `max_size` + 1, and the inner lists must
+        all be of length 2. In the outer list, the first element corresponds to
+        the first assembly step in which the complex binds the first subunit.  The next corresponds to a bound subunit binding to form a
+        2-subunit complex, and the last element corresponds to the final step in
+        which the `max_size`th subunit is added. Each inner list contains the
+        forward and reverse rate constants (in that order) for the corresponding
+        assembly reaction, and each of these pairs must comprise solely
+        Parameter objects or solely numbers (never one of each). If Parameters
+        are passed, they will be used directly in the generated Rules. If
+        numbers are passed, Parameters will be created with automatically
+        generated names based on `subunit`, `site1`, `site2` and the chain sizes
+        and these parameters will be included at the end of the returned
+        component list.
+    comp : optional; a ComplexPattern to which the base molecule is attached.
+
+    Examples
+    --------
+    Assemble a three-membered chain by sequential addition of monomers to a base, which is in turn attached to a complex,
+    with the same forward/reverse rates for monomer-monomer and monomer-dimer
+    interactions::
+
+        Model()
+        Monomer('Base', ['b1', 'b2'])
+        Monomer('Unit', ['p1', 'p2'])
+        Monomer('Complex1', ['s1'])
+        Monomer('Complex2', ['s1', s2'])
+        assemble_chain_sequential(Base(b2=ANY), 'b1', Unit, 'p1', 'p2', 3, [[1e-4, 1e-1]] * 2, Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY))
+
+    Execution::
+
+        >>> Model() # doctest:+ELLIPSIS
+        <Model '<interactive>' (monomers: 0, rules: 0, parameters: 0, compartments: 0) at ...>
+        >>> Monomer('Base', ['b1', 'b2'])
+        Monomer('Base', ['b1', 'b2'])
+        >>> Monomer('Unit', ['p1', 'p2'])
+        Monomer('Unit', ['p1', 'p2'])
+        >>> Monomer('Complex1', ['s1'])
+        Monomer('Complex1', ['s1'])
+        >>> Monomer('Complex2', ['s1', 's2'])
+        Monomer('Complex2', ['s1', s2'])
+        >>> assemble_chain_sequential(Base(b2=ANY), 'b1', Unit, 'p1', 'p2', 3, [[1e-4, 1e-1]] * 2, Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY)) # doctest:+NORMALIZE_WHITESPACE
+        ComponentSet([
+         Rule('assemble_chain_sequential_base_Unit_1',
+              Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY) % Base(b2=ANY, b1=None) + Unit(p1=None, p2=None) <>
+              Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY) % Base(b2=ANY, b1=1) % Unit(p1=1, p2=None),
+              assemble_chain_sequential_base_Unit_1_kf,
+              assemble_chain_sequential_base_Unit_1_kr),
+         Parameter('assemble_chain_sequential_base_Unit_1_kf', .0001),
+         Parameter('assemble_chain_sequential_base_Unit_1_kr', .1),
+         Rule('assemble_chain_sequential_base_Unit_2',
+              Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY) % Base(b2=ANY, b1=1) % Unit(p1=1, p2=None) + Unit(p1=None, p2=None) <>
+                  Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY) % Base(b2=ANY, b1=1) % Unit(p1=1, p2=2) % Unit(p1=2, p2=None),
+              assemble_chain_sequential_base_Unit_2_kf,
+              assemble_chain_sequential_base_Unit_2_kr),
+         Parameter('assemble_chain_sequential_base_Unit_2_kf', 0.0001),
+         Parameter('assemble_chain_sequential_base_Unit_2_kr', 0.1),
+         Rule('assemble_chain_sequential_base_Unit_3',
+              Unit(p1=None, p2=None) + Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY) % Base(b2=ANY, b1=1) % Unit(p1=1, p2=2) % Unit(p1=2, p2=None) <>
+                  MatchOnce(Complex1(s1=ANY) % Complex2(s1=ANY, s2=ANY) % Base(b2=ANY, b1=1) % Unit(p1=1, p2=2) % Unit(p1=2, p2=3) % Unit(p1=3, p2=None)),
+              assemble_chain_sequential_base_Unit_3_kf,
+              assemble_chain_sequential_base_Unit_3_kr),
+         Parameter('assemble_chain_sequential_base_Unit_3_kf', 0.0001),
+         Parameter('assemble_chain_sequential_base_Unit_3_kr', 0.1),
+         ])
+
+    """
+
+    if len(ktable) != max_size-1:
+        raise ValueError("len(ktable) must be equal to max_size-1")
+
+    def chain_rule_name(rule_expression, size):
+        react_p = rule_expression.reactant_pattern
+        monomer = react_p.complex_patterns[0].monomer_patterns[0].monomer
+        return '%s_%d' % (monomer.name, size)
+
+    components = ComponentSet()
+    s = subunit({site1:None, site2:None})
+    for size, klist in zip(range(2, max_size + 1), ktable):
+        chain_prev = chain_species_base(base, basesite, subunit, site1, site2, size - 1, comp)
+        chain_next = chain_species_base(base, basesite, subunit, site1, site2, size, comp)
+        name_func = functools.partial(chain_rule_name, size=size)
+        components |= _macro_rule('assemble_chain_sequential_base',
                                   s + chain_prev <> chain_next,
                                   klist, ['kf', 'kr'],
                                   name_func=name_func)
