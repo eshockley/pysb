@@ -7,6 +7,7 @@ import re
 import collections
 import weakref
 import copy
+import itertools
 
 
 def Initial(*args):
@@ -483,6 +484,48 @@ class ComplexPattern(object):
         """
         return ComplexPattern([mp() for mp in self.monomer_patterns], self.compartment, self.match_once)
 
+    def __call__(self, **kwargs):
+        """Build a new ComplexPattern with updated site conditions."""
+
+        # Ensure we don't have more than one of any Monomer in our patterns.
+        mp_monomer = lambda mp: mp.monomer
+        patterns_sorted = sorted(self.monomer_patterns, key=mp_monomer)
+        pgroups = itertools.groupby(patterns_sorted, mp_monomer)
+        pcounts = [(monomer, sum(1 for mp in mps)) for monomer, mps in pgroups]
+        dup_monomers = [monomer.name for monomer, count in pcounts if count > 1]
+        if dup_monomers:
+            raise DuplicateMonomerError("ComplexPattern has duplicate "
+                                        "Monomers: " + str(dup_monomers))
+
+        # Ensure all specified sites are present in some Monomer.
+        self_site_groups = (mp.monomer.sites for mp in self.monomer_patterns)
+        self_sites = list(itertools.chain(*self_site_groups))
+        unknown_sites = set(kwargs).difference(self_sites)
+        if unknown_sites:
+            raise UnknownSiteError("Unknown sites in argument list: " +
+                                   ", ".join(unknown_sites))
+
+        # Ensure no specified site is present in multiple Monomers.
+        used_sites = [s for s in self_sites if s in kwargs]
+        sgroups = itertools.groupby(sorted(used_sites))
+        scounts = [(name, sum(1 for s in sites)) for name, sites in sgroups]
+        dup_sites = [name for name, count in scounts if count > 1]
+        if dup_sites:
+            raise DuplicateSiteError("ComplexPattern has duplicate sites: " +
+                                     str(dup_sites))
+
+        # Copy self so we can modify it in place before returning it.
+        cp = self.copy()
+        # Build map from site name to MonomerPattern.
+        site_map = {}
+        for mp in cp.monomer_patterns:
+            site_map.update(dict.fromkeys(mp.monomer.sites, mp))
+        # Apply kwargs to our ComplexPatterns.
+        for site, condition in kwargs.items():
+            site_map[site].site_conditions[site] = condition
+        return cp
+
+
     def __add__(self, other):
         if isinstance(other, ComplexPattern):
             return ReactionPattern([self, other])
@@ -500,6 +543,12 @@ class ComplexPattern(object):
             elif self.match_once != other.match_once:
                 raise ValueError("merged ComplexPatterns must have the same value of match_once")
             return ComplexPattern(self.monomer_patterns + other.monomer_patterns, self.compartment, self.match_once)
+        else:
+            return NotImplemented
+
+    def __rmod__(self, other):
+        if isinstance(other, MonomerPattern):
+            return ComplexPattern([other] + self.monomer_patterns, self.compartment, self.match_once)
         else:
             return NotImplemented
 
@@ -825,10 +874,15 @@ class Observable(Component):
     ----------
     reaction_pattern : ReactionPattern
         The list of ComplexPatterns to match.
+    match : 'species' or 'molecules'
+        Whether to match entire species ('species') or individual fragments
+        ('molecules'). Default is 'molecules'.
 
     Attributes
     ----------
     reaction_pattern : ReactionPattern
+        See Parameters.
+    match : 'species' or 'molecules'
         See Parameters.
     species : list of integers
         List of species indexes for species matching the pattern.
@@ -842,25 +896,27 @@ class Observable(Component):
     solely so users could utilize the ComplexPattern '+' operator overload as
     syntactic sugar. There are no actual "reaction" semantics in this context.
 
-    Currently only BNG's 'Molecules' observables are supported, i.e. an
-    observable on "A()" will count dimers of A at two times the actual species
-    amount. 'Species' observables will be implemented in the future.
-
     """
 
-    def __init__(self, name, reaction_pattern, _export=True):
+    def __init__(self, name, reaction_pattern, match='molecules', _export=True):
         try:
             reaction_pattern = as_reaction_pattern(reaction_pattern)
         except InvalidReactionPatternException as e:
             raise type(e)("Observable pattern does not look like a ReactionPattern")
+        if match not in ('molecules', 'species'):
+            raise ValueError("Match must be 'molecules' or 'species'")
         Component.__init__(self, name, _export)
         self.reaction_pattern = reaction_pattern
+        self.match = match
         self.species = []
         self.coefficients = []
 
     def __repr__(self):
-        ret = '%s(%s, %s)' % (self.__class__.__name__, repr(self.name),
+        ret = '%s(%s, %s' % (self.__class__.__name__, repr(self.name),
                               repr(self.reaction_pattern))
+        if self.match != 'molecules':
+            ret += ', match=%s' % repr(self.match)
+        ret += ')'
         return ret
 
 
@@ -1246,6 +1302,15 @@ class InvalidComponentNameError(ValueError):
 
 class InvalidInitialConditionError(ValueError):
     """Invalid initial condition pattern."""
+
+class DuplicateMonomerError(ValueError):
+    pass
+
+class DuplicateSiteError(ValueError):
+    pass
+
+class UnknownSiteError(ValueError):
+    pass
 
 
 class ComponentSet(collections.Set, collections.Mapping, collections.Sequence):
