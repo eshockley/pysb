@@ -1022,6 +1022,9 @@ class Model(object):
         self.observables = ComponentSet()
         self.species = []
         self.odes = []
+        self.jacobian = []
+        self.jacobian_params = []
+        self.hessian = []
         self.reactions = []
         self.reactions_bidirectional = []
         self.initial_conditions = []

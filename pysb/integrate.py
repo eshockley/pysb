@@ -1,4 +1,5 @@
 import pysb.bng
+import pysb.generate_derivs
 import numpy
 from scipy.integrate import ode
 from scipy.weave import inline
@@ -84,11 +85,28 @@ class Solver(object):
     def __init__(self, model, tspan, integrator='vode', **integrator_options):
 
         pysb.bng.generate_equations(model)
+        pysb.generate_derivs.gen_jacobian(model)
 
         code_eqs = '\n'.join(['ydot[%d] = %s;' % (i, sympy.ccode(model.odes[i])) for i in range(len(model.odes))])
         code_eqs = re.sub(r's(\d+)', lambda m: 'y[%s]' % (int(m.group(1))), code_eqs)
         for i, p in enumerate(model.parameters):
             code_eqs = re.sub(r'\b(%s)\b' % p.name, 'p[%d]' % i, code_eqs)
+
+        nonzero_indx = []
+        i_indx = []
+        j_indx = []
+        for i in range(len(model.jacobian)):
+            for j in range(len(model.jacobian)):
+                if model.jacobian[i][j] != 0:
+                    x = i * len(model.jacobian) + j
+                    nonzero_indx.append(x)
+                    i_indx.append(i)
+                    j_indx.append(j)
+        code_jac = '\n'.join(['yderiv[%d] = %s;' % (x, sympy.ccode(model.jacobian[i][j])) for x, i, j in zip(nonzero_indx, i_indx, j_indx)])            
+        #code_jac = '\n'.join(['yderiv[%d] = %s;' % (i * len(model.jacobian) + j, sympy.ccode(model.jacobian[i][j])) for i in range(len(model.jacobian)) for j in range(len(model.jacobian))])
+        code_jac = re.sub(r's(\d+)', lambda m: 'y[%s]' % (int(m.group(1))), code_jac)
+        for i, p in enumerate(model.parameters):
+           code_jac = re.sub(r'\b(%s)\b' % p.name, 'p[%d]' % i, code_jac)
 
         Solver._test_inline()
         # If we can't use weave.inline to run the C code, compile it as Python code instead for use with
@@ -96,6 +114,7 @@ class Solver(object):
         # be valid Python.  If the equations ever have more complex things in them, this might fail.
         if not Solver._use_inline:
             code_eqs_py = compile(code_eqs, '<%s odes>' % model.name, 'exec')
+            code_jac_py = compile(code_jac, '<%s jacobian>' % model.name, 'exec')
 
         def rhs(t, y, p):
             ydot = self.ydot
@@ -106,6 +125,20 @@ class Solver(object):
                 exec code_eqs_py in locals()
             return ydot
 
+        def jac(t, y, p):
+            yderiv = self.yderiv
+            if Solver._use_inline:
+                inline(code_jac, ['yderiv', 't', 'y', 'p']);
+    
+            else:
+                exec code_jac_py in locals()
+
+            yderiv_fix = numpy.zeros(shape=(len(model.species), len(model.species)))
+            for i,j in zip(i_indx, j_indx):
+                x = i * len(model.jacobian) + j
+                yderiv_fix[i][j] = yderiv[x]
+            return yderiv_fix
+            
         # build integrator options list from our defaults and any kwargs passed to this function
         options = {}
         try:
@@ -118,13 +151,17 @@ class Solver(object):
         self.tspan = tspan
         self.y = numpy.ndarray((len(tspan), len(model.species)))
         self.ydot = numpy.ndarray(len(model.species))
+        self.yderiv = numpy.zeros(len(model.species) * len(model.species))
         if len(model.observables):
             self.yobs = numpy.ndarray(len(tspan), zip(model.observables.keys(),
                                                       itertools.repeat(float)))
         else:
             self.yobs = numpy.ndarray((len(tspan), 0))
         self.yobs_view = self.yobs.view(float).reshape(len(self.yobs), -1)
-        self.integrator = ode(rhs).set_integrator(integrator, **options)
+        if options.get('with_jacobian') == True:
+            self. integrator = ode(rhs, jac).set_integrator(integrator, **options)
+        else:
+            self.integrator = ode(rhs).set_integrator(integrator, **options)
 
 
     def run(self, param_values=None, y0=None):
@@ -175,6 +212,7 @@ class Solver(object):
         # perform the actual integration
         self.integrator.set_initial_value(y0, self.tspan[0])
         self.integrator.set_f_params(param_values)
+        self.integrator.set_jac_params(param_values)
         self.y[0] = y0
         i = 1
         while self.integrator.successful() and self.integrator.t < self.tspan[-1]:
