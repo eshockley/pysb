@@ -1,8 +1,6 @@
 """A simple three-species chemical kinetics system known as "Robertson's
 example", as presented in:
 
-#Testing Eclipse
-
 H. H. Robertson, The solution of a set of reaction rate equations, in Numerical
 Analysis: An Introduction, J. Walsh, ed., Academic Press, 1966, pp. 178-182.
 """
